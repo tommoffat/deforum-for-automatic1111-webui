@@ -12,6 +12,9 @@ from .gradio_funcs import *
 from .general_utils import get_os, get_deforum_version, custom_placeholder_format, test_long_path_support, get_max_path_length, substitute_placeholders
 from .deforum_controlnet import setup_controlnet_ui, controlnet_component_names, controlnet_infotext
 import tempfile
+import json
+from itertools import product
+import random
         
 def Root():
     device = sh.device
@@ -75,6 +78,9 @@ def DeforumAnimArgs():
     use_noise_mask = False
     mask_schedule = '0: ("{video_mask}")'
     noise_mask_schedule = '0: ("{video_mask}")'
+    # Prompt randomization
+    enable_prompt_randomization = False
+    random_prompt_src = ""
     # Checkpoint Scheduling
     enable_checkpoint_scheduling = False
     checkpoint_schedule = '0: ("model1.ckpt"), 100: ("model2.ckpt")'
@@ -192,6 +198,8 @@ def DeforumArgs():
 
     #**Batch Settings**
     n_batch = 1 #
+    enable_arg_matrix = False
+    arg_matrix = ""
     batch_name = "Deforum_{timestring}" 
     filename_format = "{timestring}_{index}_{prompt}.png" # ["{timestring}_{index}_{seed}.png","{timestring}_{index}_{prompt}.png"]
     seed_behavior = "iter" # ["iter","fixed","random","ladder","alternate","schedule"]
@@ -272,6 +280,7 @@ def DeforumOutputArgs():
     ffmpeg_location = find_ffmpeg_binary()
     ffmpeg_crf = '17'
     ffmpeg_preset = 'slow'
+    aggregate_batch_outputs = False
     add_soundtrack = 'None' # ["File","Init Video"]
     soundtrack_path = "https://deforum.github.io/a1/A1.mp3"
     # End-Run upscaling
@@ -359,6 +368,16 @@ def setup_deforum_setting_dictionary(self, is_img2img, is_extension = True):
                     seed = gr.Number(label="Seed", value=d.seed, interactive=True, precision=0)
                     n_batch = gr.Slider(label="# of vids", minimum=1, maximum=100, step=1, value=d.n_batch, interactive=True)
                     batch_name = gr.Textbox(label="Batch name", lines=1, interactive=True, value = d.batch_name)
+                
+                # ARGUMENT MATRIX ACCORD
+                with gr.Accordion('Argument Matrix', open=True):
+                    with gr.Accordion('Help', open=False):
+                        gr.HTML("""<ul style="list-style-type:circle; margin-left:1em">
+                        <li>Use the Argument Matrix to generate multiple videos with different arguments.</li>""")
+                    enable_arg_matrix = gr.Checkbox(label='Enable Argument Matrix', value=False, interactive=True, elem_id='enable_arg_matrix')
+                    arg_matrix = gr.Textbox(label="Argument Matrix", lines=5, interactive=True, value=d.arg_matrix)
+
+                # RESTORE FACES & TILING ACCORD
                 with gr.Accordion('Restore Faces, Tiling & more', open=False) as run_more_settings_accord:
                     with gr.Row(variant='compact'):
                         restore_faces = gr.Checkbox(label='Restore Faces', value=d.restore_faces)
@@ -366,6 +385,7 @@ def setup_deforum_setting_dictionary(self, is_img2img, is_extension = True):
                         ddim_eta = gr.Number(label="DDIM Eta", value=d.ddim_eta, interactive=True)
                     with gr.Row(variant='compact') as pix2pix_img_cfg_scale_row:
                         pix2pix_img_cfg_scale_schedule = gr.Textbox(label="Pix2Pix img CFG schedule", value=da.pix2pix_img_cfg_scale_schedule, interactive=True)    
+            
                 # RUN FROM SETTING FILE ACCORD
                 with gr.Accordion('Resume & Run from file', open=False):
                     with gr.Tab('Run from Settings file'):
@@ -593,6 +613,12 @@ def setup_deforum_setting_dictionary(self, is_img2img, is_extension = True):
                     animation_prompts_positive = gr.Textbox(label="Prompts positive", lines=1, interactive=True, value = "")
                 with gr.Row(variant='compact'):
                     animation_prompts_negative = gr.Textbox(label="Prompts negative", lines=1, interactive=True, value = "")
+                
+                # PROMPT RANDOMIZATION ACCORD
+                with gr.Row(variant='compact'):
+                    enable_prompt_randomization = gr.Checkbox(label="Randomize Animation Prompts", value=da.enable_prompt_randomization, interactive=True)
+                    random_prompt_src = gr.Textbox(label="Prompt Source File", interactive=True, value=da.random_prompt_src)
+
                 # COMPOSABLE MASK SCHEDULING ACCORD
                 with gr.Accordion('Composable Mask scheduling', open=False):
                     gr.HTML("""
@@ -776,6 +802,7 @@ def setup_deforum_setting_dictionary(self, is_img2img, is_extension = True):
                         with gr.Row(equal_height=True, variant='compact', visible=True) as ffmpeg_set_row:
                             ffmpeg_crf = gr.Slider(minimum=0, maximum=51, step=1, label="CRF", value=dv.ffmpeg_crf, interactive=True)
                             ffmpeg_preset = gr.Dropdown(label="Preset", choices=['veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast', 'superfast', 'ultrafast'], interactive=True, value = dv.ffmpeg_preset, type="value")
+                            aggregate_batch_outputs = gr.Checkbox(label='Aggregate Batch Outputs', value=dv.aggregate_batch_outputs, interactive=True, elem_id='aggregate_batch_outputs')
                         with gr.Row(equal_height=True, variant='compact', visible=True) as ffmpeg_location_row:
                             ffmpeg_location = gr.Textbox(label="Location", lines=1, interactive=True, value = dv.ffmpeg_location)
                 # FRAME INTERPOLATION TAB
@@ -1014,6 +1041,7 @@ anim_args_names =   str(r'''animation_mode, max_frames, border,
                         enable_steps_scheduling, steps_schedule,
                         fov_schedule, aspect_ratio_schedule, near_schedule, far_schedule,
                         seed_schedule,
+                        enable_prompt_randomization, random_prompt_src,
                         enable_sampler_scheduling, sampler_schedule,
                         mask_schedule, use_noise_mask, noise_mask_schedule,
                         enable_checkpoint_scheduling, checkpoint_schedule,
@@ -1040,6 +1068,7 @@ args_names =    str(r'''W, H, tiling, restore_faces,
                         seed_enable_extras, seed_resize_from_w, seed_resize_from_h,
                         steps, ddim_eta,
                         n_batch,
+                        arg_matrix, enable_arg_matrix,
                         save_settings, save_samples, display_samples,
                         save_sample_per_step, show_sample_per_step, 
                         batch_name, filename_format,
@@ -1054,7 +1083,7 @@ video_args_names =  str(r'''skip_video_creation,
                             fps, make_gif, delete_imgs, output_format, ffmpeg_location, ffmpeg_crf, ffmpeg_preset,
                             add_soundtrack, soundtrack_path,
                             r_upscale_video, r_upscale_model, r_upscale_factor, r_upscale_keep_imgs,
-                            render_steps,
+                            render_steps, aggregate_batch_outputs,
                             path_name_modifier, image_path, mp4_path, store_frames_in_ram,
                             frame_interpolation_engine, frame_interpolation_x_amount, frame_interpolation_slow_mo_enabled, frame_interpolation_slow_mo_amount,
                             frame_interpolation_keep_imgs'''
@@ -1189,7 +1218,30 @@ def process_args(args_dict_main):
         os.makedirs(args.outdir)
     
     return root, args, anim_args, video_args, parseq_args, loop_args, controlnet_args
-    
+
+def process_matrix_args(args_dict):
+    arg_matrix = json.loads(args_dict['arg_matrix'])
+
+    keys, values = zip(*arg_matrix.items())
+    permutations = product(*values)
+    args_dict_list = [dict(zip(keys, combination)) for combination in permutations]
+
+    return args_dict_list
+
+def randomize_animation_prompts(animation_prompts, source_file):
+    keyframes = list(json.loads(animation_prompts).keys())
+
+    # 'animation_prompts.txt'
+    with open(source_file, 'r') as file:
+        lines = [line.strip() for line in file]
+    random_lines = random.sample(lines, len(keyframes))
+    random.shuffle(random_lines)
+
+    random_lines_dict = {keyframes[i]: line.strip() for i, line in enumerate(random_lines)}
+    json_string = json.dumps(random_lines_dict)
+
+    return json_string
+
 # Local gradio-to-frame-interoplation function. *Needs* to stay here since we do Root() and use gradio elements directly, to be changed in the future
 def upload_vid_to_interpolate(file, engine, x_am, sl_enabled, sl_am, keep_imgs, f_location, f_crf, f_preset, in_vid_fps):
     # print msg and do nothing if vid not uploaded or interp_x not provided

@@ -60,6 +60,7 @@ def render_animation(args, anim_args, video_args, parseq_args, loop_args, contro
     # use parseq if manifest is provided
     use_parseq = parseq_args.parseq_manifest != None and parseq_args.parseq_manifest.strip()
     # expand key frame strings to values
+
     keys = DeformAnimKeys(anim_args, args.seed) if not use_parseq else ParseqAnimKeys(parseq_args, anim_args, video_args)
     loopSchedulesAndData = LooperAnimKeys(loop_args, anim_args, args.seed)
     # resume animation
@@ -533,6 +534,10 @@ def render_animation(args, anim_args, video_args, parseq_args, loop_args, contro
         # on strength 0, set color match to generation
         if strength == 0 and not anim_args.color_coherence in ['Image', 'Video Input']:
             color_match_sample = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+
+        print("Image shape:", np.array(image).shape)
+        print("Data type:", np.array(image).dtype)
+
 
         opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         if not using_vid_init:
